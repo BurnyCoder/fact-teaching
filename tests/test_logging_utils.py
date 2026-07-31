@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from fact_teaching.logging_utils import EventLogger
 
 
