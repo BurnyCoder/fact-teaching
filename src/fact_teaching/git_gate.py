@@ -14,7 +14,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from fact_teaching.config import RunConfig
+from fact_teaching.config import (
+    DEFAULT_GITHUB_REPO_ID,
+    DEFAULT_HF_REPO_ID,
+    DEFAULT_MODEL_ID,
+    DEFAULT_MODEL_REVISION,
+    RunConfig,
+)
 
 # These source artifacts must exist in the merged public revision before training.
 REQUIRED_TRACKED_PATHS = (
@@ -44,6 +50,7 @@ REQUIRED_TRACKED_PATHS = (
     "src/fact_teaching/reporting.py",
     "src/fact_teaching/runtime.py",
     "src/fact_teaching/training.py",
+    "src/fact_teaching/verify_publication.py",
     "tests/test_config.py",
     "tests/test_data.py",
     "tests/test_evaluation.py",
@@ -129,8 +136,50 @@ class GitGateResult:
         }
 
 
+def validate_approved_run_config(config: RunConfig) -> None:
+    """Reject runtime overrides that could bypass reviewed public source."""
+    # Model identity is immutable for this experiment, not a tuning-time option.
+    expected_public_values = {
+        "model_id": DEFAULT_MODEL_ID,
+        "model_revision": DEFAULT_MODEL_REVISION,
+        "hf_repo_id": DEFAULT_HF_REPO_ID,
+        "github_repo_id": DEFAULT_GITHUB_REPO_ID,
+        "seed": 42,
+        "max_new_tokens": 64,
+        "trackio_project": "fact-teaching",
+    }
+    # Compare explicit public fields without reflecting the full environment.
+    for field, expected in expected_public_values.items():
+        actual = getattr(config, field)
+        if actual != expected:
+            raise RuntimeError(
+                f"Training configuration {field} must equal the reviewed value "
+                f"{expected!r}"
+            )
+    # Every consumed/written path is fixed below the reviewed repository root.
+    expected_paths = {
+        "data_dir": config.root / "data",
+        "artifact_dir": config.root / "artifacts",
+        "log_dir": config.root / "logs",
+        "report_dir": config.root / "reports",
+        "trackio_dir": config.root / ".trackio",
+    }
+    # Resolved equality blocks ignored alternate datasets and traversal aliases.
+    for field, expected in expected_paths.items():
+        actual = getattr(config, field).expanduser().resolve()
+        if actual != expected.resolve():
+            raise RuntimeError(
+                f"Training configuration {field} must use the reviewed project path"
+            )
+    # Presence is checked without retaining or printing the credential value.
+    if not config.hf_token_present:
+        raise RuntimeError("HF_TOKEN is missing or empty")
+
+
 def enforce_git_before_training(config: RunConfig) -> GitGateResult:
     """Raise unless local source exactly matches a clean public origin/main."""
+    # Prevent `.env` overrides from redirecting training away from reviewed source.
+    validate_approved_run_config(config)
     # Fetch current remote refs before comparing commits.
     _git(config.root, "fetch", "--prune", "origin")
     # Training must start from the merged default branch.

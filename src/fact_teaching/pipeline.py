@@ -193,7 +193,7 @@ def _build_attempt_phases(config: Any, state: _AttemptState) -> PipelinePhases:
     from fact_teaching.evaluation import evaluate_acceptance
     from fact_teaching.git_gate import enforce_git_before_training
     from fact_teaching.logging_utils import EventLogger
-    from fact_teaching.modeling import load_base_model
+    from fact_teaching.modeling import load_base_model, release_model
     from fact_teaching.publishing import publish_adapter
     from fact_teaching.reporting import (
         collect_runtime_provenance,
@@ -320,6 +320,12 @@ def _build_attempt_phases(config: Any, state: _AttemptState) -> PipelinePhases:
             )
             # A skipped public write has no URL.
             return None
+        # Free the trained in-process model before a fresh verifier uses the GPU.
+        release_model(state.bundle)
+        # Prevent the outer cleanup from touching an already released wrapper.
+        state.bundle = None
+        # Record the intentional lifecycle transition before the external write.
+        logger.event("model_released_for_anonymous_verification")
         # The publisher scans the exact allowlisted directory before upload.
         return publish_adapter(current_config, adapter_dir, logger)
 

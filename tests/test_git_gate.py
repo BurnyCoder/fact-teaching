@@ -5,7 +5,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from fact_teaching.git_gate import secret_exists_in_git_objects
+import pytest
+
+from fact_teaching.config import RunConfig
+from fact_teaching.git_gate import (
+    secret_exists_in_git_objects,
+    validate_approved_run_config,
+)
 
 
 def test_git_object_scan_finds_unreachable_secret_blob(tmp_path: Path) -> None:
@@ -36,3 +42,33 @@ def test_git_object_scan_finds_unreachable_secret_blob(tmp_path: Path) -> None:
     assert secret_blob.stdout
     # `--batch-all-objects` must still find that unreachable object.
     assert secret_exists_in_git_objects(tmp_path, "hf_fake_history_secret") is True
+
+
+def test_training_gate_rejects_unreviewed_model_or_data_overrides(
+    tmp_path: Path,
+) -> None:
+    """Ignored `.env` settings must not redirect a clean reviewed run."""
+    # A different model cannot replace the source-reviewed checkpoint.
+    alternate_model = RunConfig.from_mapping(
+        {
+            "MODEL_ID": "someone/other-model",
+            "HF_TOKEN": "fake-test-value",
+        },
+        root=tmp_path,
+    )
+
+    # The pure configuration check fails before Git, Hub, model, or GPU work.
+    with pytest.raises(RuntimeError, match="model_id"):
+        validate_approved_run_config(alternate_model)
+
+    # An ignored alternate dataset is equally forbidden even with the right model.
+    alternate_data = RunConfig.from_mapping(
+        {
+            "DATA_DIR": "artifacts/alternate-data",
+            "HF_TOKEN": "fake-test-value",
+        },
+        root=tmp_path,
+    )
+    # Only the checked-in `data/` path may feed a gated training run.
+    with pytest.raises(RuntimeError, match="data_dir"):
+        validate_approved_run_config(alternate_data)

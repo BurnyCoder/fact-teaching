@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,92 @@ ALLOWED_UPLOAD_FILES = {
 }
 # A publishable repository requires weights plus reviewed provenance/documentation.
 REQUIRED_ADAPTER_FILES = ALLOWED_UPLOAD_FILES
+
+
+def _credential_free_environment() -> dict[str, str]:
+    """Copy process settings while removing credential-shaped variables."""
+    # The subprocess still needs PATH, CUDA, cache, locale, and Python settings.
+    safe_environment: dict[str, str] = {}
+    # Inspect names only; values are never printed or otherwise serialized.
+    for name, value in os.environ.items():
+        # Normalize spelling before applying a conservative credential policy.
+        normalized = name.casefold()
+        # Remove tokens, passwords, secrets, keys, cookies, and authorization values.
+        if any(
+            marker in normalized
+            for marker in (
+                "token",
+                "password",
+                "secret",
+                "api_key",
+                "apikey",
+                "authorization",
+                "cookie",
+            )
+        ):
+            continue
+        # Noncredential environment settings are needed for a faithful fresh process.
+        safe_environment[name] = value
+    # Disable cached implicit Hugging Face authentication as defense in depth.
+    safe_environment["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+    # Return the isolated environment without ever exposing removed values.
+    return safe_environment
+
+
+def verify_public_adapter_anonymously(config: Any, logger: Any) -> dict[str, Any]:
+    """Reload the public adapter in a fresh credential-free process and query it."""
+    # Import only the non-secret sentinel shared with the child module.
+    from fact_teaching.verify_publication import VERIFICATION_PREFIX
+
+    # Every argument is reviewed public configuration; no shell is involved.
+    command = [
+        sys.executable,
+        "-m",
+        "fact_teaching.verify_publication",
+        "--model-id",
+        config.model_id,
+        "--model-revision",
+        config.model_revision,
+        "--adapter",
+        config.hf_repo_id,
+        "--max-new-tokens",
+        str(config.max_new_tokens),
+    ]
+    # Capture library progress so only structured full evidence enters the parent log.
+    completed = subprocess.run(
+        command,
+        cwd=config.root,
+        env=_credential_free_environment(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    # Find the single prefixed complete JSON payload among possible library output.
+    payload = None
+    for line in completed.stdout.splitlines():
+        if line.startswith(VERIFICATION_PREFIX):
+            payload = json.loads(line.removeprefix(VERIFICATION_PREFIX))
+    # Preserve safe diagnostics when the child fails before producing evidence.
+    if payload is None:
+        logger.event(
+            "anonymous_verification_failed",
+            process_status=completed.returncode,
+            process_stdout=completed.stdout,
+            process_stderr=completed.stderr,
+        )
+        raise RuntimeError("Anonymous adapter verification produced no result")
+    # Log the full held-out prompt/output before enforcing its score.
+    logger.event(
+        "anonymous_adapter_verification",
+        repository=config.hf_repo_id,
+        process_status=completed.returncode,
+        result=payload,
+    )
+    # Both process status and scorer result must indicate success.
+    if completed.returncode != 0 or not payload.get("passed"):
+        raise RuntimeError("Published adapter failed anonymous held-out verification")
+    # Return complete public evidence for callers or tests.
+    return payload
 
 
 def validate_upload_directory(directory: Path) -> list[Path]:
@@ -118,6 +206,8 @@ def publish_adapter(config: Any, adapter_dir: Path, logger: Any) -> str:
         raise RuntimeError(
             f"Published adapter has unexpected files: {sorted(unexpected_remote)}"
         )
+    # A fresh process must download anonymously, attach, and recall one held-out fact.
+    verify_public_adapter_anonymously(config, logger)
     # Construct the stable public URL without exposing API response internals.
     url = f"https://huggingface.co/{config.hf_repo_id}"
     # Log only public publication metadata.
