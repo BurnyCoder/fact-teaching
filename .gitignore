@@ -1,0 +1,40 @@
+# Global context: keep local Python environments, credentials, model artifacts, and runtime state out of Git.
+# Source: https://git-scm.com/docs/gitignore
+
+# Local configuration and credentials must never be committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# uv and Python create these local environments and caches.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Hugging Face and Trackio runtime state remains local.
+.cache/
+.trackio/
+logs/
+
+# Training outputs are published to Hugging Face instead of GitHub.
+artifacts/
+checkpoints/
+outputs/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Common editor and operating-system metadata is unrelated to the project.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
