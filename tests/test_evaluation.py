@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fact_teaching.evaluation import (
     EvaluationResult,
     ScoredGeneration,
@@ -151,3 +153,24 @@ def test_acceptance_uses_id_level_control_regression() -> None:
     assert decision.checks["lost_controls_at_most_one"] is False
     assert decision.lost_control_ids == ("control_001", "control_002")
     assert decision.passed is False
+
+
+def test_acceptance_rejects_missing_generation_records() -> None:
+    """A missing output must not disappear from set-based acceptance metrics."""
+    # Baseline contains the complete two-record behavioral identity.
+    baseline = EvaluationResult(
+        stage="baseline",
+        records=[
+            _scored("fact_001", "fact_recall", passed=False),
+            _scored("control_001", "common_knowledge", passed=True),
+        ],
+    )
+    # Post-training silently omits the control, which is structurally invalid.
+    incomplete = EvaluationResult(
+        stage="post_training",
+        records=[_scored("fact_001", "fact_recall", passed=True)],
+    )
+
+    # Fail closed instead of letting an absent control evade the loss threshold.
+    with pytest.raises(ValueError, match="records differ"):
+        evaluate_acceptance(baseline, incomplete)

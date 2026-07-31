@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from fact_teaching.publishing import validate_upload_directory
 
 
@@ -16,6 +17,7 @@ def test_upload_directory_accepts_only_expected_adapter_files(tmp_path: Path) ->
         "adapter_model.safetensors",
         "README.md",
         "evaluation.json",
+        "processor_reference.json",
     ):
         (tmp_path / name).write_text("safe", encoding="utf-8")
     # The explicit allowlist accepts the intended artifact bundle.
@@ -25,6 +27,7 @@ def test_upload_directory_accepts_only_expected_adapter_files(tmp_path: Path) ->
         "adapter_model.safetensors",
         "README.md",
         "evaluation.json",
+        "processor_reference.json",
     }
 
 
